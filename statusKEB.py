@@ -14,13 +14,14 @@ import psycopg2
 from lib import read_config, s, l
 
 STATUSES = {
-'BANK REFUSAL': 430,
-'APPROVED': 140,
-'CLIENT REFUSAL': 440,
-'ISSUED': 210,
-'CANCEL': 450,
-'EXPIRED': 460,
-'STATUS_HAS_ERROR': 470
+'отклонено скорингом': 430,
+'отклонена банком': 430,
+'не соответствует требованиям': 430,
+'продукт не нужен': 430,
+'регион без представительства КЕБ': 430,
+'дубликат (предыдущая заявка)': 430,
+'карта выдана': 140,
+'активирована карта': 200,
 }
 
 
@@ -114,7 +115,7 @@ if __name__ == '__main__':
     # Sort file names with path
     path = "./"
     file_list = os.listdir(path)
-    full_list = [os.path.join(path, i) for i in file_list if i.startswith('Raiffeisen_Finfort_') and i.endswith('.xlsx')]
+    full_list = [os.path.join(path, i) for i in file_list if i.startswith('KEB_') and i.endswith('.xlsx')]
     xlsxs = sorted(full_list, key = os.path.getmtime)
 
     for xlsx in xlsxs:
@@ -144,39 +145,22 @@ if __name__ == '__main__':
                 wso_skip_id.append(row)
                 #wso_double.append(row)
                 for j, cell in enumerate(row):
-                    if str(cell).upper() == 'UTM_TERM':
+                    if str(cell).upper() == 'UTM_CAMPAIGN':
                         column_utm_source = j
-                    if str(cell).upper() == 'APPROVAL':
-                        column_approval = j
-                    if str(cell).upper() == 'REMOTE_ID':
-                        column_remote_id = j
                     if str(cell).upper() == 'RESULT':
                         column_result = j
-                    if str(cell).upper() == 'DECISION':
-                        column_decision = j
-                    if str(cell).upper() == 'DEAL':
-                        column_deal = j
             else:
                 # Если нет нужной информации - выходим
-                if (column_utm_source < 0 and column_remote_id < 0) or (column_approval < 0 and column_result < 0
-                                                                        and column_decision < 0 and column_deal < 0):
+                if column_utm_source < 0 and column_result < 0:
                     print('Нет колонки с id или колонки со статусом')
                     sys.exit()
                 # Если не смогли расшифровать статус - пропускаем строчку
                 status = -1
-                if column_deal > -1:
-                    if int(float(filter_x00(row[column_deal]).upper().strip())) == 1:
-                        status = STATUSES['ISSUED']
-                if column_decision > -1 and status < 0:
-                    status = STATUSES.get(filter_x00(row[column_decision]).upper().strip(), -1)
                 if column_result > -1 and status < 0:
-                    status = STATUSES.get(filter_x00(row[column_result]).upper().strip(), -1)
-                if column_approval > -1 and status < 0:
-                    status = STATUSES.get(filter_x00(row[column_approval]).upper().strip(), -1)
+                    status = STATUSES.get(filter_x00(row[column_result]).lower().strip(), -1)
                 if status < 0: # Нет статуса
                     wso_skip_status.append(row)
                     continue
-                remote_id = ''
                 remote_id_utm = ''
                 remote_id_remote = ''
                 if column_utm_source > -1 and str(type(row[column_utm_source])).find('str') > -1:
@@ -185,28 +169,16 @@ if __name__ == '__main__':
                         remote_id_utm = filter_x00(agent2remote_id)[filter_x00(agent2remote_id).find('_') + 1:].strip()
                         if not colls.find({'remote_id': remote_id_utm}).count():
                             remote_id_utm = ''
-                if column_remote_id > -1 and str(type(row[column_remote_id])).find('str') > -1:
-                    if len(filter_x00(row[column_remote_id].strip())) == 36:
-                        remote_id_remote = row[column_remote_id].strip()
-                        if not colls.find({'remote_id': remote_id_remote}).count():
-                            remote_id_remote = ''
-                if remote_id_remote == '' and remote_id_utm == '': # Нет id
+                if remote_id_utm == '': # Нет id
                     wso_skip_id.append(row)
                     row += ('не определился',)
                     wso_task.append(row)
                     continue
-                elif remote_id_remote and remote_id_utm and remote_id_remote != remote_id_utm:
-                    # Два неодинаковых id в одной строке - берём remote_id_utm
-                    remote_id = remote_id_utm
-                elif remote_id_utm:
-                    remote_id = remote_id_utm
-                elif remote_id_remote:
-                    remote_id = remote_id_remote
                 # заполняем вкладку Задание, добавляя туда remote_id
-                row += (remote_id,)
+                row += (remote_id_utm,)
                 wso_task.append(row)
                 # заполняем вкладку Исходный
-                for j, coll in enumerate(colls.find({'remote_id': remote_id})):
+                for j, coll in enumerate(colls.find({'remote_id': remote_id_utm})):
                     if not j:
                         fields_ish = []
                         for field in coll.keys():
@@ -217,9 +189,9 @@ if __name__ == '__main__':
                                 fields_ish.append(coll.get(field))
                         wso_ish.append(fields_ish)
                 # обновляем
-                colls.update({'remote_id': remote_id}, {'$set': {'state_code': status}})
+                colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
                 # заполняем вкладку результата
-                for j, coll in enumerate(colls.find({'remote_id': remote_id})):
+                for j, coll in enumerate(colls.find({'remote_id': remote_id_utm})):
                     if not j:
                         fields_rez = []
                         for field in coll.keys():
@@ -229,9 +201,9 @@ if __name__ == '__main__':
                             else:
                                 fields_rez.append(coll.get(field))
                         wso_rez.append(fields_rez)
-        wbo.save(xlsx.split('Raiffeisen_Finfort_')[0] + 'loaded/' +
+        wbo.save(xlsx.split('KEB_')[0] + 'loaded/' +
                  time.strftime('%Y-%m-%d_%H-%M', time.gmtime(os.path.getmtime(xlsx))) + '_' +
-                 xlsx.split('Raiffeisen_Finfort_')[1])
+                 xlsx.split('KEB_')[1])
         os.remove(xlsx)
 
 
