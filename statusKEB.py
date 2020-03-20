@@ -25,6 +25,10 @@ STATUSES = {
 'активирована карта': 200,
 }
 
+STATUSES_PRESCORE = {
+'отказ': 430,
+}
+
 
 st = """
 'STATUS_NONE' : 0, # Utils DEFAULT_VALUE
@@ -132,7 +136,7 @@ if __name__ == '__main__':
         wso_rez = wbo.create_sheet('Результат')
         ids = []
         column_utm_source = -1
-        column_approval = -1
+        column_prescore = -1
         column_remote_id = -1
         column_result = -1
         column_decision = -1
@@ -150,15 +154,19 @@ if __name__ == '__main__':
                         column_utm_source = j
                     if str(cell).upper() == 'RESULT':
                         column_result = j
+                    if str(cell).upper() == 'PRESCORE':
+                        column_prescore = j
             else:
                 # Если нет нужной информации - выходим
-                if column_utm_source < 0 and column_result < 0:
-                    print('Нет колонки с id или колонки со статусом')
+                if column_utm_source < 0 and (column_result < 0 or column_prescore < 0):
+                    print('Нет столбца UTM_CAMPAIGN, RESULT или PRESCORE')
                     sys.exit()
                 # Если не смогли расшифровать статус - пропускаем строчку
                 status = -1
-                if column_result > -1 and status < 0:
+                if column_result > -1:
                     status = STATUSES.get(filter_x00(row[column_result]).lower().strip(), -1)
+                elif column_prescore > -1:
+                    status = STATUSES_PRESCORE.get(filter_x00(row[column_prescore]).lower().strip(), -1)
                 if status < 0: # Нет статуса
                     wso_skip_status.append(row)
                     continue
@@ -190,7 +198,12 @@ if __name__ == '__main__':
                                 fields_ish.append(coll.get(field))
                         wso_ish.append(fields_ish)
                 # обновляем
-                colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
+                if column_result > -1:
+                    colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
+                elif column_prescore > -1:
+                    colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
+                else:
+                    print('Этой ошибки быть не должно')
                 # заполняем вкладку результата
                 for j, coll in enumerate(colls.find({'remote_id': remote_id_utm})):
                     if not j:
