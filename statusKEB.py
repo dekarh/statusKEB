@@ -139,7 +139,7 @@ if __name__ == '__main__':
         column_prescore = -1
         column_remote_id = -1
         column_result = -1
-        column_decision = -1
+        column_limit = -1
         column_deal = -1
         for i, row in enumerate(ws.values):
             # определяем колонку в которой id
@@ -156,17 +156,23 @@ if __name__ == '__main__':
                         column_result = j
                     if str(cell).upper() == 'PRESCORE':
                         column_prescore = j
+                    if str(cell).upper() == 'LIMIT':
+                        column_limit = j
             else:
                 # Если нет нужной информации - выходим
                 if column_utm_source < 0 and (column_result < 0 or column_prescore < 0):
-                    print('Нет столбца UTM_CAMPAIGN, RESULT или PRESCORE')
+                    print('Нет столбца UTM_CAMPAIGN, RESULT, LIMIT или PRESCORE')
                     sys.exit()
                 # Если не смогли расшифровать статус - пропускаем строчку
                 status = -1
                 if column_result > -1:
                     status = STATUSES.get(filter_x00(row[column_result]).lower().strip(), -1)
-                elif column_prescore > -1:
-                    status = STATUSES_PRESCORE.get(filter_x00(row[column_prescore]).lower().strip(), -1)
+                else:
+                    if column_prescore > -1:
+                        status = STATUSES_PRESCORE.get(filter_x00(row[column_prescore]).lower().strip(), -1)
+                    if column_limit > -1 and (str(filter_x00(row[column_prescore])).find('>')
+                                            or l(filter_x00(row[column_prescore]))):
+                        status = STATUSES['карта выдана']
                 if status < 0: # Нет статуса
                     wso_skip_status.append(row)
                     continue
@@ -199,6 +205,8 @@ if __name__ == '__main__':
                         wso_ish.append(fields_ish)
                 # обновляем
                 if column_result > -1:
+                    colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
+                elif column_limit > -1:
                     colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
                 elif column_prescore > -1:
                     colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
