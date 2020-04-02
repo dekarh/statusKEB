@@ -163,6 +163,22 @@ if __name__ == '__main__':
                 if column_utm_source < 0 and (column_result < 0 or column_prescore < 0):
                     print('Нет столбца UTM_CAMPAIGN, RESULT, LIMIT или PRESCORE')
                     sys.exit()
+                # Если не смогли расшифровать remote_id - пропускаем строчку
+                remote_id_utm = ''
+                if column_utm_source > -1 and str(type(row[column_utm_source])).find('str') > -1:
+                    agent2remote_id = row[column_utm_source]
+                    if len(filter_x00(agent2remote_id)[filter_x00(agent2remote_id).find('_') + 1:].strip()) == 36:
+                        remote_id_utm = filter_x00(agent2remote_id)[filter_x00(agent2remote_id).find('_') + 1:].strip()
+                        if not colls.find({'remote_id': remote_id_utm}).count():
+                            wso_skip_id.append(row)
+                            row += ('нет такого remote_id в БД:' + str(remote_id_utm),)
+                            wso_task.append(row)
+                            continue
+                if remote_id_utm == '': # Нет id
+                    wso_skip_id.append(row)
+                    row += ('remote_id не определился:' + str(row[column_utm_source]),)
+                    wso_task.append(row)
+                    continue
                 # Если не смогли расшифровать статус - пропускаем строчку
                 status = -1
                 if column_result > -1:
@@ -170,24 +186,11 @@ if __name__ == '__main__':
                 else:
                     if column_prescore > -1:
                         status = STATUSES_PRESCORE.get(filter_x00(row[column_prescore]).lower().strip(), -1)
-                    if column_limit > -1 and (str(filter_x00(row[column_prescore])).find('>')
-                                            or l(filter_x00(row[column_prescore]))):
+                    if column_limit > -1 and (str(filter_x00(row[column_limit])).find('>') > -1
+                                            or l(filter_x00(row[column_limit]))):
                         status = STATUSES['карта выдана']
                 if status < 0: # Нет статуса
                     wso_skip_status.append(row)
-                    continue
-                remote_id_utm = ''
-                remote_id_remote = ''
-                if column_utm_source > -1 and str(type(row[column_utm_source])).find('str') > -1:
-                    agent2remote_id = row[column_utm_source]
-                    if len(filter_x00(agent2remote_id)[filter_x00(agent2remote_id).find('_') + 1:].strip()) == 36:
-                        remote_id_utm = filter_x00(agent2remote_id)[filter_x00(agent2remote_id).find('_') + 1:].strip()
-                        if not colls.find({'remote_id': remote_id_utm}).count():
-                            remote_id_utm = ''
-                if remote_id_utm == '': # Нет id
-                    wso_skip_id.append(row)
-                    row += ('не определился',)
-                    wso_task.append(row)
                     continue
                 # заполняем вкладку Задание, добавляя туда remote_id
                 row += (remote_id_utm,)
