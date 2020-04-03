@@ -21,14 +21,14 @@ STATUSES = {
 'отказ клиента': 430,
 'регион без представительства КЕБ': 430,
 'дубликат (предыдущая заявка)': 430,
-'карта выдана': 140,
-'активирована карта': 200,
+'карта выдана': 210,
+'активирована карта': 260,
 }
 
 STATUSES_PRESCORE = {
 'отказ': 430,
+'одобрено': 140,
 }
-
 
 st = """
 'STATUS_NONE' : 0, # Utils DEFAULT_VALUE
@@ -176,7 +176,7 @@ if __name__ == '__main__':
                             continue
                 if remote_id_utm == '': # Нет id
                     wso_skip_id.append(row)
-                    row += ('remote_id не определился:' + str(row[column_utm_source]),)
+                    row += ('remote_id не определился: ' + str(row[column_utm_source]),)
                     wso_task.append(row)
                     continue
                 # Если не смогли расшифровать статус - пропускаем строчку
