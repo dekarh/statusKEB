@@ -13,24 +13,7 @@ import psycopg2
 
 from lib import read_config, s, l
 
-STATUSES = {
-'отклонено скорингом': 430,
-'отклонена банком': 430,
-'не соответствует требованиям': 430,
-'продукт не нужен': 430,
-'отказ клиента': 430,
-'регион без представительства КЕБ': 430,
-'дубликат (предыдущая заявка)': 430,
-'карта выдана': 210,
-'активирована карта': 260,
-}
-
-STATUSES_PRESCORE = {
-'отказ': 430,
-'одобрено': 140,
-}
-
-st = """
+EVA_STATUS = {
 'STATUS_NONE' : 0, # Utils DEFAULT_VALUE
 'STATUS_NEW' : 20, # Новая заявка
 'STATUS_QUEUED' : 100, # Заявка отправлена в очередь
@@ -95,7 +78,46 @@ st = """
 'UBRR_API_ERROR_DOUBLE' : 860, # Дубль заявки
 'UBRR_API_ERROR_VALIDATE' : 870, # Данные не валидны
 'UBRR_API_CLAIM_SEND' : 880, # Заявка передана
-"""
+}
+
+COLUMNS = ['UTM_CAMPAIGN','RESULT', 'PRESCORE', 'LIMIT', 'CARD_STATUS']
+
+STATUSES = {}
+
+STATUSES['RESULT'] = {
+'отклонено скорингом': EVA_STATUS['STATUS_DENIED'],
+'отклонена банком': EVA_STATUS['STATUS_DENIED'],
+'не соответствует требованиям': EVA_STATUS['STATUS_DENIED'],
+'продукт не нужен': EVA_STATUS['STATUS_DENIED'],
+'отказ клиента': EVA_STATUS['STATUS_DENIED'],
+'регион без представительства КЕБ': EVA_STATUS['STATUS_DENIED'],
+'дубликат (предыдущая заявка)': EVA_STATUS['STATUS_DENIED'],
+'карта выдана': EVA_STATUS['STATUS_ISSUED'],
+'активирована карта': EVA_STATUS['STATUS_ACTIVATED'],
+}
+
+STATUSES['LIMIT'] = {
+'отклонено скорингом': EVA_STATUS['STATUS_DENIED'],
+'отклонена банком': EVA_STATUS['STATUS_DENIED'],
+'не соответствует требованиям': EVA_STATUS['STATUS_DENIED'],
+'продукт не нужен': EVA_STATUS['STATUS_DENIED'],
+'отказ клиента': EVA_STATUS['STATUS_DENIED'],
+'регион без представительства КЕБ': EVA_STATUS['STATUS_DENIED'],
+'дубликат (предыдущая заявка)': EVA_STATUS['STATUS_DENIED'],
+'карта выдана': EVA_STATUS['STATUS_ISSUED'],
+'активирована карта': EVA_STATUS['STATUS_ACTIVATED'],
+}
+
+STATUSES['PRESCORE'] = {
+'отказ': EVA_STATUS['STATUS_DENIED'],
+'одобрено': EVA_STATUS['STATUS_APPROVED'],
+}
+
+# !!! Обрабатывается в последнюю очередь, ДОБАВЛЯТЬ только исключающие обработку статусы
+STATUSES['CARD_STATUS'] = {
+    'карта закрыта': True
+}
+
 def filter_x00(inp):
     inp = s(inp)
     inp = inp.replace('_x0020_',' ')
@@ -135,12 +157,7 @@ if __name__ == '__main__':
         #wso_double = wbo.create_sheet('Два разных id в одной строке')
         wso_rez = wbo.create_sheet('Результат')
         ids = []
-        column_utm_source = -1
-        column_prescore = -1
-        column_remote_id = -1
-        column_result = -1
-        column_limit = -1
-        column_deal = -1
+        column = {c: -1 for c in COLUMNS} # генерируем column = {'UTM_CAMPAIGN': -1, ..., 'CARD_STATUS': -1} из COLUMNS
         for i, row in enumerate(ws.values):
             # определяем колонку в которой id
             if not i:
@@ -151,22 +168,24 @@ if __name__ == '__main__':
                 #wso_double.append(row)
                 for j, cell in enumerate(row):
                     if str(cell).upper() == 'UTM_CAMPAIGN':
-                        column_utm_source = j
+                        column['UTM_CAMPAIGN'] = j
                     if str(cell).upper() == 'RESULT':
-                        column_result = j
+                        column['RESULT'] = j
                     if str(cell).upper() == 'PRESCORE':
-                        column_prescore = j
+                        column['PRESCORE'] = j
                     if str(cell).upper() == 'LIMIT':
-                        column_limit = j
+                        column['LIMIT'] = j
+                    if str(cell).upper() == 'CARD_STATUS':
+                        column['CARD_STATUS'] = j
             else:
                 # Если нет нужной информации - выходим
-                if column_utm_source < 0 and (column_result < 0 or column_prescore < 0):
+                if column['UTM_CAMPAIGN'] < 0 and (column['RESULT'] < 0 or column['PRESCORE'] < 0):
                     print('Нет столбца UTM_CAMPAIGN, RESULT, LIMIT или PRESCORE')
                     sys.exit()
                 # Если не смогли расшифровать remote_id - пропускаем строчку
                 remote_id_utm = ''
-                if column_utm_source > -1 and str(type(row[column_utm_source])).find('str') > -1:
-                    agent2remote_id = row[column_utm_source]
+                if column['UTM_CAMPAIGN'] > -1 and str(type(row[column['UTM_CAMPAIGN']])).find('str') > -1:
+                    agent2remote_id = row[column['UTM_CAMPAIGN']]
                     if len(filter_x00(agent2remote_id)[filter_x00(agent2remote_id).find('_') + 1:].strip()) == 36:
                         remote_id_utm = filter_x00(agent2remote_id)[filter_x00(agent2remote_id).find('_') + 1:].strip()
                         if not colls.find({'remote_id': remote_id_utm}).count():
@@ -176,19 +195,23 @@ if __name__ == '__main__':
                             continue
                 if remote_id_utm == '': # Нет id
                     wso_skip_id.append(row)
-                    row += ('remote_id не определился: ' + str(row[column_utm_source]),)
+                    row += ('remote_id не определился: ' + str(row[column['UTM_CAMPAIGN']]),)
                     wso_task.append(row)
                     continue
                 # Если не смогли расшифровать статус - пропускаем строчку
                 status = -1
-                if column_result > -1:
-                    status = STATUSES.get(filter_x00(row[column_result]).lower().strip(), -1)
+                if column['RESULT'] > -1:
+                    status = STATUSES['RESULT'].get(filter_x00(row[column['RESULT']]).lower().strip(), -1)
                 else:
-                    if column_prescore > -1:
-                        status = STATUSES_PRESCORE.get(filter_x00(row[column_prescore]).lower().strip(), -1)
-                    if column_limit > -1 and (str(filter_x00(row[column_limit])).find('>') > -1
-                                            or l(filter_x00(row[column_limit]))):
-                        status = STATUSES['карта выдана']
+                    if column['PRESCORE'] > -1:
+                        status = STATUSES['PRESCORE'].get(filter_x00(row[column['PRESCORE']]).lower().strip(), -1)
+                    if column['LIMIT'] > -1 and (str(filter_x00(row[column['LIMIT']])).find('>') > -1
+                                                 or l(filter_x00(row[column['LIMIT']]))):
+                        status = STATUSES['LIMIT']['карта выдана']
+                    card_status = STATUSES['CARD_STATUS'].get(filter_x00(row[column['CARD_STATUS']]).lower().strip(),
+                                                              False)
+                    if column['CARD_STATUS'] > -1 and card_status:
+                        status = -1
                 if status < 0: # Нет статуса
                     wso_skip_status.append(row)
                     continue
@@ -207,11 +230,11 @@ if __name__ == '__main__':
                                 fields_ish.append(coll.get(field))
                         wso_ish.append(fields_ish)
                 # обновляем
-                if column_result > -1:
+                if column['RESULT'] > -1:
                     colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
-                elif column_limit > -1:
+                elif column['LIMIT'] > -1:
                     colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
-                elif column_prescore > -1:
+                elif column['PRESCORE'] > -1:
                     colls.update({'remote_id': remote_id_utm}, {'$set': {'state_code': status}})
                 else:
                     print('Этой ошибки быть не должно')
