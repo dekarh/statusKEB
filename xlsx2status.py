@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Заполняем поле статуса в монго конвертируя его из Excel
 
 import sys, argparse
@@ -10,9 +9,15 @@ from collections import OrderedDict
 import openpyxl
 from pymongo import MongoClient
 import psycopg2
+import argparse
+import inspect
+
 
 from lib import read_config, s, l
 
+# Обрабатываем только эти варианты
+PRODUCTS = ['keb', 'raif']
+# Возможные статусы будем получать из АПИ
 EVA_STATUS = {
 'STATUS_NONE' : 0, # Utils DEFAULT_VALUE
 'STATUS_NEW' : 20, # Новая заявка
@@ -80,44 +85,6 @@ EVA_STATUS = {
 'UBRR_API_CLAIM_SEND' : 880, # Заявка передана
 }
 
-COLUMNS = ['UTM_CAMPAIGN','RESULT', 'PRESCORE', 'LIMIT', 'CARD_STATUS']
-
-STATUSES = {}
-
-STATUSES['RESULT'] = {
-'отклонено скорингом': EVA_STATUS['STATUS_DENIED'],
-'отклонена банком': EVA_STATUS['STATUS_DENIED'],
-'не соответствует требованиям': EVA_STATUS['STATUS_DENIED'],
-'продукт не нужен': EVA_STATUS['STATUS_DENIED'],
-'отказ клиента': EVA_STATUS['STATUS_DENIED'],
-'регион без представительства КЕБ': EVA_STATUS['STATUS_DENIED'],
-'дубликат (предыдущая заявка)': EVA_STATUS['STATUS_DENIED'],
-'карта выдана': EVA_STATUS['STATUS_ISSUED'],
-'активирована карта': EVA_STATUS['STATUS_ACTIVATED'],
-}
-
-STATUSES['LIMIT'] = {
-'отклонено скорингом': EVA_STATUS['STATUS_DENIED'],
-'отклонена банком': EVA_STATUS['STATUS_DENIED'],
-'не соответствует требованиям': EVA_STATUS['STATUS_DENIED'],
-'продукт не нужен': EVA_STATUS['STATUS_DENIED'],
-'отказ клиента': EVA_STATUS['STATUS_DENIED'],
-'регион без представительства КЕБ': EVA_STATUS['STATUS_DENIED'],
-'дубликат (предыдущая заявка)': EVA_STATUS['STATUS_DENIED'],
-'карта выдана': EVA_STATUS['STATUS_ISSUED'],
-'активирована карта': EVA_STATUS['STATUS_ACTIVATED'],
-}
-
-STATUSES['PRESCORE'] = {
-'отказ': EVA_STATUS['STATUS_DENIED'],
-'одобрено': EVA_STATUS['STATUS_APPROVED'],
-}
-
-# !!! Обрабатывается в последнюю очередь, ДОБАВЛЯТЬ только исключающие обработку статусы
-STATUSES['CARD_STATUS'] = {
-    'карта закрыта': True
-}
-
 def filter_x00(inp):
     inp = s(inp)
     inp = inp.replace('_x0020_',' ')
@@ -129,21 +96,52 @@ def filter_x00(inp):
             inp = inp.split('_X0')[0] + inp.split('_X0')[1].split('_')[1]
     return inp
 
-if __name__ == '__main__':
-    # подключаемся к серверу
-    cfg = read_config(filename='anketa.ini', section='Mongo')
-    conn = MongoClient('mongodb://' + cfg['user'] + ':' + cfg['password'] + '@' + cfg['ip'] + ':' + cfg['port'] + '/'
-                       + cfg['db'])
-    # выбираем базу данных
-    db = conn.saturn_v
-    # выбираем коллекцию документов
-    colls = db.Products
+def keb(product, colls, path, file=None):
+    COLUMNS = ['UTM_CAMPAIGN', 'RESULT', 'PRESCORE', 'LIMIT', 'CARD_STATUS']
 
-    # Sort file names with path
-    path = "./"
-    file_list = os.listdir(path)
-    full_list = [os.path.join(path, i) for i in file_list if i.startswith('KEB_') and i.endswith('.xlsx')]
-    xlsxs = sorted(full_list, key = os.path.getmtime)
+    STATUSES = {}
+
+    STATUSES['RESULT'] = {
+        'отклонено скорингом': EVA_STATUS['STATUS_DENIED'],
+        'отклонена банком': EVA_STATUS['STATUS_DENIED'],
+        'не соответствует требованиям': EVA_STATUS['STATUS_DENIED'],
+        'продукт не нужен': EVA_STATUS['STATUS_DENIED'],
+        'отказ клиента': EVA_STATUS['STATUS_DENIED'],
+        'регион без представительства КЕБ': EVA_STATUS['STATUS_DENIED'],
+        'дубликат (предыдущая заявка)': EVA_STATUS['STATUS_DENIED'],
+        'карта выдана': EVA_STATUS['STATUS_ISSUED'],
+        'активирована карта': EVA_STATUS['STATUS_ACTIVATED'],
+    }
+
+    STATUSES['LIMIT'] = {
+        'отклонено скорингом': EVA_STATUS['STATUS_DENIED'],
+        'отклонена банком': EVA_STATUS['STATUS_DENIED'],
+        'не соответствует требованиям': EVA_STATUS['STATUS_DENIED'],
+        'продукт не нужен': EVA_STATUS['STATUS_DENIED'],
+        'отказ клиента': EVA_STATUS['STATUS_DENIED'],
+        'регион без представительства КЕБ': EVA_STATUS['STATUS_DENIED'],
+        'дубликат (предыдущая заявка)': EVA_STATUS['STATUS_DENIED'],
+        'карта выдана': EVA_STATUS['STATUS_ISSUED'],
+        'активирована карта': EVA_STATUS['STATUS_ACTIVATED'],
+    }
+
+    STATUSES['PRESCORE'] = {
+        'отказ': EVA_STATUS['STATUS_DENIED'],
+        'одобрено': EVA_STATUS['STATUS_APPROVED'],
+    }
+
+    # !!! Обрабатывается в последнюю очередь, ДОБАВЛЯТЬ только исключающие обработку статусы
+    STATUSES['CARD_STATUS'] = {
+        'карта закрыта': True
+    }
+
+    if file:
+        xlsxs = [file]
+    else:
+        file_list = os.listdir(path)
+        # Sort file names with path
+        full_list = [os.path.join(path, i) for i in file_list if i.startswith('KEB_') and i.endswith('.xlsx')]
+        xlsxs = sorted(full_list, key = os.path.getmtime)
 
     for xlsx in xlsxs:
         print('\n', xlsx,'\n')
@@ -249,9 +247,46 @@ if __name__ == '__main__':
                             else:
                                 fields_rez.append(coll.get(field))
                         wso_rez.append(fields_rez)
-        wbo.save(xlsx.split('KEB_')[0] + 'loaded/' +
-                 time.strftime('%Y-%m-%d_%H-%M', time.gmtime(os.path.getmtime(xlsx))) + '_' +
-                 xlsx.split('KEB_')[1])
+        if file:
+            wbo.save('loaded' + product.upper() + '/' +
+                     time.strftime('%Y-%m-%d_%H-%M', time.gmtime(os.path.getmtime(xlsx))) + '_' + xlsx)
+        else:
+            wbo.save('loaded' + product.upper() + '/' +
+                     time.strftime('%Y-%m-%d_%H-%M', time.gmtime(os.path.getmtime(xlsx))) + '_' + xlsx.split('KEB_')[1])
         os.remove(xlsx)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Импорт статусов в Еву из .xlsx (Excel-2007) файлов', add_help=True)
+    parser.add_argument('product', type=str, choices=PRODUCTS, help='продукт или продуктовая сеть')
+    parser.add_argument('-d', '--dir', dest='dir', action='store', type=str, default='.',
+                        help='путь к файлам со статусами')
+    parser.add_argument('-f', '--file', dest='file', action='store', type=str, default=None,
+                        help='обработать только этот файл')
+    args = parser.parse_args()
+    if args.file:
+        if not str(args.file).endswith('.xlsx') and not os.path.exists(args.file):
+            print(args.file, ' - файл отсутствует или не .xlsx '
+                             'Укажите путь и имя существующего .xlsx (Excel-2007) файла')
+            sys.exit()
+    if args.dir != '.':
+        if not os.path.exists(args.dir):
+            print(args.dir, ' - директория отсутствует. Укажите путь к существующей директории')
+            sys.exit()
+
+    # Создаем директории загруженных файлов-логов для всех продуктов
+    for product in PRODUCTS:
+        if not os.path.exists('loaded' + product.upper() + '/'):
+            os.mkdir('loaded' + product.upper() + '/')
+
+    # подключаемся к серверу
+    cfg = read_config(filename='status.ini', section='Mongo')
+    conn = MongoClient('mongodb://' + cfg['user'] + ':' + cfg['password'] + '@' + cfg['ip'] + ':' + cfg['port'] + '/'
+                       + cfg['db'])
+    # выбираем базу данных
+    db = conn.saturn_v
+    # выбираем коллекцию документов db.Products
+
+    # Вызываем функцию с именем модуля
+    locals()[locals()['args'].product](args.product, db.Products, args.dir, file=args.file)
 
 
